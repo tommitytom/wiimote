@@ -32,57 +32,60 @@ DWORD WINAPI WiimoteStart(_In_ LPVOID lpParameter)
 
 
 WiimoteDeviceWindows::WiimoteDeviceWindows(HANDLE _deviceHandle, bool _useOutputReportSize)
-	:_useOutputReportSize(_useOutputReportSize), _deviceHandle(_deviceHandle), _readThread(NULL), _run(FALSE), _outputReportMinSize(0)
+	:_useOutputReportSize(_useOutputReportSize), _deviceHandle(_deviceHandle), _readThread(NULL), _run(FALSE), _outputReportSize(0)
 {
 	ZeroMemory(&_readIo, sizeof(_readIo));
 }
 
 WiimoteDeviceWindows::~WiimoteDeviceWindows()
 {
+	stopReader();
 
+	if (_deviceHandle != INVALID_HANDLE_VALUE)
+	{
+		CloseHandle(_deviceHandle);
+		_deviceHandle = nullptr;
+	}
 }
 
 bool WiimoteDeviceWindows::setup()
 {
-	PHIDP_PREPARSED_DATA PreparsedData = NULL;
-	HIDP_CAPS Caps;
-	BOOLEAN Result;
-	NTSTATUS Status;
+	PHIDP_PREPARSED_DATA preparsedData = NULL;
+	HIDP_CAPS caps;
+	BOOLEAN result;
+	NTSTATUS status;
 
-	//std::cout << "Setting up: \t" << DeviceHandle << std::endl;
-	//std::cout << "Resize Output: \t" << (UseOutputReportSize ? "Yes" : "No") << std::endl;
-
-	Result = HidD_GetPreparsedData(_deviceHandle, &PreparsedData);
-	if (!Result)
+	result = HidD_GetPreparsedData(_deviceHandle, &preparsedData);
+	if (!result)
 	{
 		std::cout << "GetPreparsedData Failed!" << std::endl;
 		return false;
 	}
 
-	Status = HidP_GetCaps(PreparsedData, &Caps);
-	if (Status < 0)
+	status = HidP_GetCaps(preparsedData, &caps);
+	if (status < 0)
 	{
 		std::cout << "GetPreparsedData Failed!" << std::endl;
-		HidD_FreePreparsedData(PreparsedData);
+		HidD_FreePreparsedData(preparsedData);
 		return false;
 	}
 
-	/*std::cout << std::dec;
+	_outputReportSize = caps.OutputReportByteLength;
+	_inputReportSize = caps.InputReportByteLength;
 
-	std::cout << "\tUsage: " << Caps.Usage << std::endl;
-	std::cout << "\tUsagePage: " << Caps.UsagePage << std::endl;
-	std::cout << "\tInputReportByteLength: " << Caps.InputReportByteLength << std::endl;
-	std::cout << "\tOutputReportByteLength: " << Caps.OutputReportByteLength << std::endl;
-	std::cout << "\tFeatureReportByteLength: " << Caps.FeatureReportByteLength << std::endl;*/
-
-	_outputReportMinSize = Caps.OutputReportByteLength;
-
-	HidD_FreePreparsedData(PreparsedData);
+	HidD_FreePreparsedData(preparsedData);
 
 	return true;
 }
 
-void WiimoteDeviceWindows::disconnect()
+void WiimoteDeviceWindows::startReader()
+{
+	_run = true;
+	_readIo.hEvent = CreateEvent(NULL, TRUE, FALSE, NULL);
+	_readThread = CreateThread(NULL, 0, WiimoteStart, this, 0, NULL);
+}
+
+void WiimoteDeviceWindows::stopReader()
 {
 	if (_run)
 	{
@@ -91,25 +94,12 @@ void WiimoteDeviceWindows::disconnect()
 			SetEvent(_readIo.hEvent);
 		} while (WaitForSingleObject(_readThread, 100) == WAIT_TIMEOUT);
 	}
-	
-	if (_deviceHandle != INVALID_HANDLE_VALUE)
-	{
-		CloseHandle(_deviceHandle);
-		_deviceHandle = INVALID_HANDLE_VALUE;
-	}
-	
+
 	if (_readIo.hEvent != INVALID_HANDLE_VALUE)
 	{
 		CloseHandle(_readIo.hEvent);
-		_readIo.hEvent= INVALID_HANDLE_VALUE;
+		_readIo.hEvent = INVALID_HANDLE_VALUE;
 	}
-}
-
-void WiimoteDeviceWindows::startReader()
-{
-	_run = true;
-	_readIo.hEvent = CreateEvent(NULL, TRUE, FALSE, NULL);
-	_readThread = CreateThread(NULL, 0, WiimoteStart, this, 0, NULL);
 }
 
 void WiimoteDeviceWindows::continuousReader()
@@ -136,52 +126,47 @@ void WiimoteDeviceWindows::continuousReader()
 				if (!GetOverlappedResult(_deviceHandle, &_readIo, &BytesRead, TRUE))
 				{
 					Error = GetLastError();
-					std::cout << "Read Failed: " << std::hex << Error << std::endl;
+					std::cout << "Read Failed: " << GetLastErrorAsString() << std::endl;
 					continue;
 				}
 
-				if(_readIo.Internal == STATUS_PENDING)
+				if (_readIo.Internal == STATUS_PENDING)
 				{
 					std::cout << "Read Interrupted" << std::endl;
-					if(!CancelIo(_deviceHandle))
+					if (!CancelIo(_deviceHandle))
 					{
 						Error = GetLastError();
 						std::cout << "Cancel IO Failed: " << std::hex << Error << std::endl;
 					}
+
 					continue;
 				}
 			}
 		}
 
-		#define INPUT_REPORT_SIZE 22
+		assert(BytesRead % _inputReportSize == 0);
 
-		assert(BytesRead % INPUT_REPORT_SIZE == 0);
-
-		//std::cout << "Read  " << std::dec << BytesRead << " Bytes from " << "0x" << std::hex << DeviceHandle << " : ";
-		for (size_t i = 0; i < BytesRead / INPUT_REPORT_SIZE; i++)
+		for (size_t i = 0; i < BytesRead / _inputReportSize; i++)
 		{
-			unsigned char* b = Buffer + i * INPUT_REPORT_SIZE;
+			unsigned char* b = Buffer + i * _inputReportSize;
 			_callback(b);
 		}
-
-		//std::cout << std::endl;
 	}
 }
 
-bool WiimoteDeviceWindows::write(DataBuffer & Buffer)
+bool WiimoteDeviceWindows::write(DataBuffer& buffer)
 {
-	DWORD BytesWritten;
-	OVERLAPPED Overlapped;
-	ZeroMemory(&Overlapped, sizeof(Overlapped));
-	//std::cout << "0x" << std::hex << DeviceHandle << std::endl;
+	DWORD bytesWritten;
+	OVERLAPPED overlapped;
+	ZeroMemory(&overlapped, sizeof(overlapped));
 
-	if ((_useOutputReportSize) && (Buffer.size() < (size_t)_outputReportMinSize))
+	if (_useOutputReportSize && (buffer.size() < (size_t)_outputReportSize))
 	{
 		std::cout << "Resizing Buffer" << std::endl;
-		Buffer.resize(_outputReportMinSize, 0);
+		buffer.resize(_outputReportSize, 0);
 	}
 
-	BOOL Result = WriteFile(_deviceHandle, Buffer.data(), (DWORD)Buffer.size(), &BytesWritten, &Overlapped);
+	BOOL Result = WriteFile(_deviceHandle, buffer.data(), (DWORD)buffer.size(), &bytesWritten, &overlapped);
 	if (!Result)
 	{
 		DWORD Error = GetLastError();
@@ -189,17 +174,19 @@ bool WiimoteDeviceWindows::write(DataBuffer & Buffer)
 		if (Error == ERROR_INVALID_USER_BUFFER)
 		{
 			std::cout << "Falling back to SetOutputReport" << std::endl;
-			return writeFallback(Buffer);
+			_connected = writeFallback(buffer);
+			return _connected;
 		}
 		
 		if (Error != ERROR_IO_PENDING)
 		{
-			std::cout << "Write Failed: " << std::hex << Error << std::endl;
+			std::cout << "Write Failed: " << std::hex << GetLastErrorAsString() << std::endl;
+			_connected = false;
 			return false;
 		}
 	}
 
-	if (!GetOverlappedResult(_deviceHandle, &Overlapped, &BytesWritten, TRUE))
+	if (!GetOverlappedResult(_deviceHandle, &overlapped, &bytesWritten, TRUE))
 	{
 		DWORD Error = GetLastError();
 		if (Error != ERROR_GEN_FAILURE)
@@ -207,9 +194,11 @@ bool WiimoteDeviceWindows::write(DataBuffer & Buffer)
 			std::cout << "Write Failed: " << GetLastErrorAsString() << std::endl;
 		}
 		
+		_connected = false;
 		return false;
 	}
 
+	_connected = true;
 	return true;
 }
 

@@ -20,17 +20,22 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="src\concurrentqueue.h" />
+    <ClInclude Include="src\HashMap.h" />
     <ClInclude Include="src\stdafx.h" />
     <ClInclude Include="src\Wiimote.h" />
     <ClInclude Include="src\WiimoteDevice.h" />
-    <ClInclude Include="src\WiimoteFactory.h" />
+    <ClInclude Include="src\WiimoteManager.h" />
+    <ClInclude Include="src\WiimoteScanner.h" />
     <ClInclude Include="src\WiimoteState.h" />
+    <ClInclude Include="src\xxhash.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="src\stdafx.cpp" />
     <ClCompile Include="src\Wiimote.cpp" />
     <ClCompile Include="src\WiimoteDevice.cpp" />
-    <ClCompile Include="src\WiimoteFactory.cpp" />
+    <ClCompile Include="src\WiimoteManager.cpp" />
+    <ClCompile Include="src\WiimoteScanner.cpp" />
+    <ClCompile Include="src\xxhash.c" />
   </ItemGroup>
   <PropertyGroup Label="Globals">
     <VCProjectVersion>15.0</VCProjectVersion>

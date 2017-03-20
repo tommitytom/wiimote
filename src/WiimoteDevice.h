@@ -19,12 +19,13 @@ public:
 	~WiimoteDeviceWindows();
 
 	bool setup();
-	void disconnect();
 	bool write(DataBuffer& Buffer);
 	bool writeFallback(DataBuffer& Buffer);
 	void startReader();
+	void stopReader();
 	void continuousReader();
 	void setCallback(DataCallback callback) { _callback = callback; }
+	bool connected() const { return _connected; }
 
 private:
 	const bool _useOutputReportSize;
@@ -34,10 +35,14 @@ private:
 	OVERLAPPED _readIo;
 
 	bool _run;
+	bool _connected = false;
 
-	SHORT _outputReportMinSize;
+	int _outputReportSize;
+	int _inputReportSize;
 
 	std::function<void(unsigned char*)> _callback;
+
+	friend class WiimoteManager;
 };
 
 typedef WiimoteDeviceWindows WiimoteDevice;

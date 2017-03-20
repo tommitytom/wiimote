@@ -1,42 +1,50 @@
-#include "WiimoteFactory.h"
+#include "WiimoteManager.h"
 
 int main()
 {
-	WiimoteFactory factory;
-	WiimoteVector wiimotes = factory.getWiimotes();
-	
-	Wiimote* connected = nullptr;
-	for (Wiimote* wiimote : wiimotes)
-	{
-		if (wiimote->available())
-		{
-			connected = wiimote;
-			wiimote->start(ReportModes::Buttons);
-			//wiimote.setLeds(LedState::One);
-		}
-	}
+	WiimoteManager m;
+	m.onConnection([](Wiimote* wiimote)
+	{ 
+		std::cout << "Wiimote connected!" << std::endl;
 
-	bool wmpactive = false;
+		wiimote->onButton([wiimote](WiimoteButton button, bool down) {
+			if (button == WiimoteButtons::A && down)
+			{
+				if (!wiimote->getState().motionPlusActive)
+				{
+					wiimote->activateMotionPlus();
+				} else {
+					wiimote->deactivateMotionPlus();
+				}
+			}
+
+			if (button == WiimoteButtons::One)
+			{
+				if (down)
+				{
+					std::cout << "One pressed!" << std::endl;
+				} else {
+					std::cout << "One released!" << std::endl;
+
+				}
+			}
+		});
+
+		wiimote->start(WiimoteFeatures::NoIR);
+	});
+
+	m.onDisconnection([](Wiimote* wiimote)
+	{
+		std::cout << "Wiimote disconnected" << std::endl;
+	});
+
+	m.start();
 
 	int i = 0;
 	WiimoteState state[2];
 	while (true)
 	{
-		WiimoteState& s = state[i % 2];
-		WiimoteState& p = state[(i + 1) % 2];
-
-		connected->getState(s);
-		
-		if (s.buttons[WiimoteButtons::A] && s.buttons[WiimoteButtons::A] != p.buttons[WiimoteButtons::A])
-		{
-			wmpactive = !s.motionPlusActive;
-			if (wmpactive)
-			{
-				connected->activateMotionPlus();
-			} else {
-				connected->deactivateMotionPlus();
-			}
-		}
+		m.update();
 
 		LedState ledState = LedStates::One;
 		switch (i)
@@ -47,7 +55,10 @@ int main()
 			case 3: ledState = LedStates::Four;		break;
 		}
 
-		//connected->setLeds(ledState);
+		for (Wiimote* wiimote : m.connected())
+		{
+			wiimote->setLeds(ledState);
+		}
 
 		if (++i == 4) i = 0;
 		Sleep(50);
@@ -55,12 +66,6 @@ int main()
 
 	system("pause");
 	std::cout << "Exiting!" << std::endl;
-
-	for (Wiimote* wiimote : wiimotes)
-	{
-		wiimote->stop();
-		delete wiimote;
-	}
 
 	system("pause");
 

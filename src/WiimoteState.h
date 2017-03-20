@@ -103,6 +103,7 @@ typedef WiimoteTypes::WiimoteType WiimoteType;
 namespace ReportModes {
 	enum ReportMode : unsigned char
 	{
+		Unknown,
 		Buttons = 0x30,
 		ButtonsAccel = 0x31,
 		ButtonsExtension8 = 0x32,
@@ -115,6 +116,26 @@ namespace ReportModes {
 		ButtonsAccelIRExtension = 0x37,
 		Extension = 0x3D
 	};
+
+	static const char* toString(ReportMode mode)
+	{
+		switch (mode)
+		{
+			case ReportModes::Buttons: return "Buttons";
+			case ReportModes::ButtonsAccel: return "ButtonsAccel";
+			case ReportModes::ButtonsExtension8: return "ButtonsExtension8";
+			case ReportModes::ButtonsExtension19: return "ButtonsExtension19";
+			case ReportModes::ButtonsAccelIR: return "ButtonsAccelIR";
+			case ReportModes::ButtonsAccelIRInterleaved1: return "ButtonsAccelIRInterleaved1";
+			case ReportModes::ButtonsAccelIRInterleaved2: return "ButtonsAccelIRInterleaved2";
+			case ReportModes::ButtonsAccelExtension: return "ButtonsAccelExtension";
+			case ReportModes::ButtonsIRExtension: return "ButtonsIRExtension";
+			case ReportModes::ButtonsAccelIRExtension: return "ButtonsAccelIRExtension";
+			case ReportModes::Extension: return "Extension";
+		}
+
+		return "Unknown";
+	}
 }
 typedef ReportModes::ReportMode ReportMode;
 
@@ -212,7 +233,8 @@ public:
 	}
 };
 
-typedef bool WiimoteButtonState[11];
+const int c_WiimoteButtonCount = 11;
+typedef bool WiimoteButtonState[c_WiimoteButtonCount];
 typedef bool NunchuckButtonState[2];
 
 struct AccelCalibrationInfo
@@ -261,15 +283,16 @@ struct WiimoteState
 
 	AccelCalibrationInfo accelCalibration;
 	Vector3 accelerometerRaw;
-	Vector3 accelerometer;	
+	Vector3 accelerometer;
 
 	int batteryRaw = 0;
 	float battery = 0;
 	bool irCameraEnabled = false;
 	bool batteryLow = false;
 	bool extensionConnected = false;
+	bool extensionActive = false;
 	bool speakerEnabled = false;
-	bool motionPlusAttached = false;
+	bool motionPlusAvailable = false;
 	bool motionPlusActive = false;
 	bool rumble = false;
 };

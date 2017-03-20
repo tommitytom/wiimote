@@ -121,30 +121,30 @@ void parseReadData(const u8* data, DataCallback callback, RegisterType reg)
 	callback(data + 6);
 }
 
-bool Wiimote::setReportMode(ReportMode mode)
-{
-	_lock.lock();
-	_state.reportMode = mode;
-	_lock.unlock();
-
-	return _device->write(DataBuffer({ OutputReportType::DataReportMode, 0x00, mode }));
-}
-
-bool Wiimote::resetReportMode()
-{
-	_lock.lock();
-	ReportMode mode = _state.reportMode;
-	_lock.unlock();
-
-	return _device->write(DataBuffer({ OutputReportType::DataReportMode, 0x00, mode }));
-}
-
-void Wiimote::start(ReportMode mode) 
+void Wiimote::start(int featureFlags) 
 { 
-	setReportMode(mode);
+	if (_running)
+	{
+		std::cout << "Already running" << std::endl;
+		return;
+	}
+
+	_features = featureFlags;
+
+	updateStatus();
 	updateWiimoteCalibration();
 	identifyMotionPlus();
+
 	_device->startReader();
+}
+
+void Wiimote::stop() 
+{ 
+	if (!_running)
+	{
+		_device->stopReader();
+		_running = false;
+	}
 }
 
 bool Wiimote::setLeds(LedState state)
@@ -169,16 +169,8 @@ bool Wiimote::setRumble(bool rumble)
 
 bool Wiimote::updateStatus()
 {
-	_expectingStatusUpdate = true;
-	u8 s = (_state.rumble == true ? 0x01 : 0x00);
-
-	if (!_device->write(DataBuffer({ OutputReportType::Status, s })))
-	{
-		_expectingStatusUpdate = false;
-		return false;
-	}
-
-	return true;
+	u8 s = _state.leds | (_state.rumble == true ? 0x01 : 0x00);
+	return _device->write(DataBuffer({ OutputReportType::Status, s }));
 }
 
 void Wiimote::updateWiimoteCalibration()
@@ -212,8 +204,70 @@ void Wiimote::updateNunchuckCalibration()
 	});
 }
 
+#define SET_FLAG(flags, flag) flags |= flag
+#define UNSET_FLAG(flags, flag) flags &= ~flag
+
+bool Wiimote::updateReportMode()
+{
+	_state.reportMode = ReportModes::Unknown;
+
+	int features = _features;
+
+	if (!_state.extensionActive)
+	{
+		UNSET_FLAG(features, WiimoteFeatures::Extension);
+	}
+
+	if (_features | WiimoteFeatures::MotionPlus && _state.motionPlusActive)
+	{
+		SET_FLAG(features, WiimoteFeatures::Extension);
+	}
+
+	UNSET_FLAG(features, WiimoteFeatures::MotionPlus);
+
+	switch (features)
+	{
+		case WiimoteFeatures::Buttons:
+			_state.reportMode = ReportModes::Buttons;
+			break;
+		case WiimoteFeatures::Buttons | WiimoteFeatures::Accelerometer:
+			_state.reportMode = ReportModes::ButtonsAccel;
+			break;
+		case WiimoteFeatures::Buttons | WiimoteFeatures::Extension:
+			_state.reportMode = ReportModes::ButtonsExtension19;
+			break;
+		case WiimoteFeatures::Buttons | WiimoteFeatures::Accelerometer | WiimoteFeatures::IR:
+			_state.reportMode = ReportModes::ButtonsAccelIR;
+			break;
+		case WiimoteFeatures::Buttons | WiimoteFeatures::Accelerometer | WiimoteFeatures::Extension:
+			_state.reportMode = ReportModes::ButtonsAccelExtension;
+			break;
+		case WiimoteFeatures::Buttons | WiimoteFeatures::IR | WiimoteFeatures::Extension:
+			_state.reportMode = ReportModes::ButtonsIRExtension;
+			break;
+		case WiimoteFeatures::Buttons | WiimoteFeatures::Accelerometer | WiimoteFeatures::IR | WiimoteFeatures::Extension:
+			_state.reportMode = ReportModes::ButtonsAccelIRExtension;
+			break;
+		case WiimoteFeatures::Extension:
+			_state.reportMode = ReportModes::Extension;
+			break;
+		default:
+			_state.reportMode = ReportModes::ButtonsAccelExtension;
+			std::cout << "Unable to find an appropriate report mode, defaulting to ButtonsAccelExtension" << std::endl;
+	}
+
+	std::cout << "Setting report mode: " << ReportModes::toString(_state.reportMode) << std::endl;
+
+	return _device->write(DataBuffer({ OutputReportType::DataReportMode, 0x00, _state.reportMode }));
+}
+
 void Wiimote::updateExtension()
 {
+	if (_state.extensionConnected == false)
+	{
+		_state.extensionActive = false;
+	}
+
 	readRegister(RegisterTypes::ExtensionType2, 1, [this](const u8* d) {
 		bool motionPlus = d[0] == 0x04;
 
@@ -228,6 +282,7 @@ void Wiimote::updateExtension()
 		} else {
 			if (_state.extensionType != ExtensionTypes::None)
 			{
+				_state.extensionActive = false;
 				std::cout << ExtensionTypes::toString(_state.extensionType) << " disconnected" << std::endl;
 			}
 
@@ -265,10 +320,11 @@ void Wiimote::identifyExtension()
 			case ExtensionTypes::Drums:
 			case ExtensionTypes::TaikoDrum:
 				_state.extensionConnected = true;
+				_state.extensionActive = true;
 				_state.extensionType = (ExtensionType)type;
 
 				std::cout << ExtensionTypes::toString(_state.extensionType) << " connected" << std::endl;
-				writeReportMode(ReportModes::ButtonsAccelExtension);
+				updateReportMode();
 
 				break;
 			case ExtensionTypes::MotionPlus:
@@ -276,7 +332,7 @@ void Wiimote::identifyExtension()
 				if (!_state.motionPlusActive)
 				{
 					_state.motionPlusActive = true;
-					writeReportMode(ReportModes::ButtonsExtension19);
+					updateReportMode();
 					std::cout << "Motion plus active" << std::endl;
 				}
 				
@@ -301,18 +357,18 @@ void Wiimote::identifyMotionPlus()
 		if (d[0] == 0x01)
 		{
 			_state.wiimoteType = WiimoteTypes::WiimotePlus;
-			_state.motionPlusAttached = true;
+			_state.motionPlusAvailable = true;
 		} else {
 			for (int x = 0; x < 6; x++)
 			{
 				if (x != 4 && x != 0 && d[x] != ID_InactiveMotionPlus[x])
 				{
-					_state.motionPlusAttached = false;
+					_state.motionPlusAvailable = false;
 					return;
 				}
 			}
 
-			_state.motionPlusAttached = true;
+			_state.motionPlusAvailable = true;
 		}		
 	});
 }
@@ -397,12 +453,10 @@ void Wiimote::onMessage(const u8* b)
 
 		case InputReportTypes::Status:
 		{
-			if (!_expectingStatusUpdate) writeReportMode(_state.reportMode);
-			_expectingStatusUpdate = false;
-
 			parseButtons(b, _state);
 			parseStatus(b, _state);
 			updateExtension();
+			updateReportMode();
 		}
 	}
 
@@ -411,11 +465,11 @@ void Wiimote::onMessage(const u8* b)
 		if (_state.motionPlus.extensionConnected)
 		{
 			std::cout << "Extension connected" << std::endl;
-			updateExtension();
 		} else {
 			std::cout << "Extension disconnected" << std::endl;
-			updateExtension();
 		}
+
+		updateExtension();
 	}
 
 	if (_currentRead == nullptr && !_pendingReads.empty())
@@ -430,10 +484,27 @@ void Wiimote::onMessage(const u8* b)
 	_lock.unlock();
 }
 
-bool Wiimote::writeReportMode(ReportMode mode)
+void Wiimote::update()
 {
-	_state.reportMode = mode;
-	return _device->write(DataBuffer({ OutputReportType::DataReportMode, 0x00, mode }));
+	const WiimoteState& old = _outState[_outStateIdx];
+	WiimoteState& next = _outState[1 - _outStateIdx];
+
+	_lock.lock();
+	memcpy(&next, &_state, sizeof(WiimoteState));
+	_lock.unlock();
+
+	if (_buttonCallback != nullptr)
+	{
+		for (int i = 0; i < c_WiimoteButtonCount; ++i)
+		{
+			if (next.buttons[i] != old.buttons[i])
+			{
+				_buttonCallback((WiimoteButton)i, next.buttons[i]);
+			}
+		}
+	}
+
+	_outStateIdx = 1 - _outStateIdx;
 }
 
 bool Wiimote::activateExtension()
@@ -451,7 +522,7 @@ bool Wiimote::activateExtension()
 
 bool Wiimote::activateMotionPlus()
 {
-	if (!_state.motionPlusAttached) 
+	if (!_state.motionPlusAvailable) 
 	{
 		std::cout << "There is a request to activate the Wii Motion Plus even though it has not been confirmed to exist!  Trying anyway..." << std::endl;
 	}
