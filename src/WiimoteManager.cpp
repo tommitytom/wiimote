@@ -49,8 +49,19 @@ void WiimoteManager::scan()
 
 		if (!wiimote->_device->connected())
 		{
-			if (wiimote->_device->write(DataBuffer({ OutputReportType::LEDs, LedStates::All })))
+			LedState ledState = LedStates::Off;
+			switch (_nextId % 4)
 			{
+				case 0: ledState = LedStates::One;		break;
+				case 1: ledState = LedStates::Two;		break;
+				case 2: ledState = LedStates::Three;	break;
+				case 3: ledState = LedStates::Four;		break;
+			}
+
+			u8 b[2] = { OutputReportType::LEDs, ledState };
+			if (wiimote->_device->write(b, 2))
+			{
+				if (wiimote->id() == -1) wiimote->setID(_nextId++);
 				_scanLock.lock();
 				_state.added.push_back(wiimote);
 				_scanLock.unlock();
@@ -59,8 +70,9 @@ void WiimoteManager::scan()
 	}
 }
 
-void WiimoteManager::start()
+void WiimoteManager::continuousScan(int interval)
 {
+	_interval = interval;
 	_scanThread = std::thread(&WiimoteManager::continuousScanner, this);
 }
 
@@ -124,8 +136,7 @@ void WiimoteManager::shutdown()
 void WiimoteManager::continuousScanner()
 {
 	size_t sleepTime = 20;
-	size_t itrTime = 1000;
-	size_t itrMax = itrTime / sleepTime;
+	size_t itrMax = _interval / sleepTime;
 	size_t itr = 0;
 	_run = true;
 

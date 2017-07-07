@@ -1,8 +1,7 @@
-#include "WiimoteScanner.h"
+#include "WiimoteScannerWin.h"
 
 #include <assert.h>
 #include <iostream>
-#include "xxhash.h"
 
 #define DETAIL_SIZE 512
 
@@ -14,33 +13,28 @@ struct DeviceDesc
 	char detail[DETAIL_SIZE];
 };
 
-WiimoteScanner::WiimoteScanner() : _deviceInfoSet(NULL)
+WiimoteScannerWindows::WiimoteScannerWindows()
 {
 	HidD_GetHidGuid(&_hidGuid);
-
 	memset(&_deviceInfoData, 0, sizeof(SP_DEVINFO_DATA));
 	_deviceInfoData.cbSize = sizeof(SP_DEVINFO_DATA);
 	_deviceInterfaceData.cbSize = sizeof(SP_DEVICE_INTERFACE_DATA);
+}
+
+WiimoteScannerWindows::~WiimoteScannerWindows()
+{
+	
+}
+
+void WiimoteScannerWindows::scan(ScanResults& added, ScanResults& removed)
+{
+	DeviceDesc desc;
 
 	_deviceInfoSet = SetupDiGetClassDevs(&_hidGuid, NULL, NULL, DIGCF_DEVICEINTERFACE | DIGCF_PRESENT);
 	if (!_deviceInfoSet)
 	{
 		std::cout << "No HID Devices Found!" << std::endl;
 	}
-}
-
-WiimoteScanner::~WiimoteScanner()
-{
-	if (_deviceInfoSet)
-	{
-		SetupDiDestroyDeviceInfoList(_deviceInfoSet);
-		_deviceInfoSet = NULL;
-	}
-}
-
-void WiimoteScanner::scan(ScanResults& added, ScanResults& removed)
-{
-	DeviceDesc desc;
 
 	int count = 0;
 	while (SetupDiEnumDeviceInterfaces(_deviceInfoSet, NULL, &_hidGuid, count, &_deviceInterfaceData))
@@ -67,9 +61,15 @@ void WiimoteScanner::scan(ScanResults& added, ScanResults& removed)
 
 		count++;
 	}
+
+	if (_deviceInfoSet)
+	{
+		SetupDiDestroyDeviceInfoList(_deviceInfoSet);
+		_deviceInfoSet = NULL;
+	}
 }
 
-void WiimoteScanner::checkDeviceInterface(DeviceDesc& desc)
+void WiimoteScannerWindows::checkDeviceInterface(DeviceDesc& desc)
 {
 	BOOL result;
 	DWORD requiredSize;
@@ -84,7 +84,7 @@ void WiimoteScanner::checkDeviceInterface(DeviceDesc& desc)
 	result = SetupDiGetDeviceInterfaceDetail(_deviceInfoSet, &_deviceInterfaceData, detail, requiredSize, NULL, &_deviceInfoData);
 }
 
-bool WiimoteScanner::checkDevice(LPCTSTR devicePath, DeviceDesc & desc)
+bool WiimoteScannerWindows::checkDevice(LPCTSTR devicePath, DeviceDesc & desc)
 {
 	desc.openDevice = CreateFile(devicePath, GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OVERLAPPED, NULL);
 
@@ -118,7 +118,7 @@ bool WiimoteScanner::checkDevice(LPCTSTR devicePath, DeviceDesc & desc)
 	return true;
 }
 
-bool WiimoteScanner::usingToshibaStack()
+bool WiimoteScannerWindows::usingToshibaStack()
 {
 	/*HDEVINFO ParentDeviceInfoSet;
 	SP_DEVINFO_DATA ParentDeviceInfoData;

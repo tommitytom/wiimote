@@ -24,17 +24,21 @@
     <ClInclude Include="src\stdafx.h" />
     <ClInclude Include="src\Wiimote.h" />
     <ClInclude Include="src\WiimoteDevice.h" />
+    <ClInclude Include="src\WiimoteDevicePosix.h" />
+    <ClInclude Include="src\WiimoteDeviceWindows.h" />
     <ClInclude Include="src\WiimoteManager.h" />
     <ClInclude Include="src\WiimoteScanner.h" />
+    <ClInclude Include="src\WiimoteScannerWin.h" />
     <ClInclude Include="src\WiimoteState.h" />
     <ClInclude Include="src\xxhash.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="src\stdafx.cpp" />
     <ClCompile Include="src\Wiimote.cpp" />
-    <ClCompile Include="src\WiimoteDevice.cpp" />
+    <ClCompile Include="src\WiimoteDevicePosix.cpp" />
+    <ClCompile Include="src\WiimoteDeviceWindows.cpp" />
     <ClCompile Include="src\WiimoteManager.cpp" />
-    <ClCompile Include="src\WiimoteScanner.cpp" />
+    <ClCompile Include="src\WiimoteScannerWin.cpp" />
     <ClCompile Include="src\xxhash.c" />
   </ItemGroup>
   <PropertyGroup Label="Globals">

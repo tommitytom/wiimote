@@ -38,7 +38,7 @@ int main()
 		std::cout << "Wiimote disconnected" << std::endl;
 	});
 
-	m.start();
+	m.continuousScan();
 
 	int i = 0;
 	WiimoteState state[2];

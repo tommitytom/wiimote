@@ -4,6 +4,8 @@
 #include <iostream>
 
 #define CHECK_MASK(val, mask) ((val & mask) != 0x00)
+#define SET_FLAG(flags, flag) flags |= flag
+#define UNSET_FLAG(flags, flag) flags &= ~flag
 
 static const int64_t ID_ActiveMotionPlus = 0x0000A4200405;
 static const int64_t ID_ActiveMotionPlus_Nunchuck = 0x0000A4200505;
@@ -121,7 +123,21 @@ void parseReadData(const u8* data, DataCallback callback, RegisterType reg)
 	callback(data + 6);
 }
 
-void Wiimote::start(int featureFlags) 
+void Wiimote::setID(int id) 
+{
+	_id = id;
+	
+	_state.leds = LedStates::Off;
+	switch (id % 4)
+	{
+	case 0: _state.leds = LedStates::One;	break;
+	case 1: _state.leds = LedStates::Two;	break;
+	case 2: _state.leds = LedStates::Three;	break;
+	case 3: _state.leds = LedStates::Four;	break;
+	}
+}
+
+void Wiimote::start(int featureFlags)
 { 
 	if (_running)
 	{
@@ -133,17 +149,16 @@ void Wiimote::start(int featureFlags)
 
 	updateStatus();
 	updateWiimoteCalibration();
-	identifyMotionPlus();
+	//identifyMotionPlus();
 
-	_device->startReader();
+	startReader();	
 }
 
-void Wiimote::stop() 
+void Wiimote::stop()
 { 
-	if (!_running)
+	if (_running)
 	{
-		_device->stopReader();
-		_running = false;
+		stopReader();
 	}
 }
 
@@ -154,7 +169,7 @@ bool Wiimote::setLeds(LedState state)
 	u8 s = _state.leds | (_state.rumble == true ? 0x01 : 0x00);
 	_lock.unlock();
 
-	return _device->write(DataBuffer({ OutputReportType::LEDs, s }));
+	return _device->write(buffer(OutputReportTypes::LEDs, s), 2);
 }
 
 bool Wiimote::setRumble(bool rumble)
@@ -164,13 +179,13 @@ bool Wiimote::setRumble(bool rumble)
 	u8 s = _state.leds | (_state.rumble == true ? 0x01 : 0x00);
 	_lock.unlock();
 
-	return _device->write(DataBuffer({ OutputReportType::LEDs, s }));
+	return _device->write(buffer(OutputReportTypes::LEDs, s), 2);
 }
 
 bool Wiimote::updateStatus()
 {
 	u8 s = _state.leds | (_state.rumble == true ? 0x01 : 0x00);
-	return _device->write(DataBuffer({ OutputReportType::Status, s }));
+	return _device->write(buffer(OutputReportTypes::Status, s), 2);
 }
 
 void Wiimote::updateWiimoteCalibration()
@@ -204,14 +219,12 @@ void Wiimote::updateNunchuckCalibration()
 	});
 }
 
-#define SET_FLAG(flags, flag) flags |= flag
-#define UNSET_FLAG(flags, flag) flags &= ~flag
-
 bool Wiimote::updateReportMode()
 {
-	_state.reportMode = ReportModes::Unknown;
-
+	u8 s = _state.leds | (_state.rumble == true ? 0x01 : 0x00);
 	int features = _features;
+
+	_state.reportMode = ReportModes::Unknown;	
 
 	if (!_state.extensionActive)
 	{
@@ -258,7 +271,9 @@ bool Wiimote::updateReportMode()
 
 	std::cout << "Setting report mode: " << ReportModes::toString(_state.reportMode) << std::endl;
 
-	return _device->write(DataBuffer({ OutputReportType::DataReportMode, 0x00, _state.reportMode }));
+	u8* b = buffer(OutputReportTypes::DataReportMode, s);
+	b[2] = _state.reportMode;
+	return _device->write(b, 3);
 }
 
 void Wiimote::updateExtension()
@@ -331,6 +346,7 @@ void Wiimote::identifyExtension()
 			case ExtensionTypes::MotionPlus_TR:
 				if (!_state.motionPlusActive)
 				{
+					_state.motionPlusAvailable = true;
 					_state.motionPlusActive = true;
 					updateReportMode();
 					std::cout << "Motion plus active" << std::endl;
@@ -369,46 +385,49 @@ void Wiimote::identifyMotionPlus()
 			}
 
 			_state.motionPlusAvailable = true;
-		}		
+		}	
+		
+		if (_state.motionPlusAvailable && !_state.motionPlusActive && (_features | WiimoteFeatures::MotionPlus))
+		{
+			activateMotionPlus();
+		}
 	});
 }
 
 void Wiimote::readRegister(RegisterType type, short size, DataCallback callback)
 {
-	_pendingReads.push({ 
-		DataBuffer({
-			OutputReportTypes::Read,
-			(u8)(((type & 0xff000000) >> 24) | (_state.rumble ? 0x01 : 0x00)),
-			(u8)((type & 0x00ff0000) >> 16),
-			(u8)((type & 0x0000ff00) >> 8),
-			(u8)(type & 0x000000ff),
-			(u8)((size & 0xff00) >> 8),
-			(u8)(size & 0xff)
-		}),
-		callback,
-		type
-	 });
-}
-
-bool Wiimote::writeRegister(RegisterType type, const DataBuffer& buffer)
-{
-	DataBuffer data({
-		OutputReportTypes::write,
+	PendingRead r = { {
+		OutputReportTypes::Read,
 		(u8)(((type & 0xff000000) >> 24) | (_state.rumble ? 0x01 : 0x00)),
 		(u8)((type & 0x00ff0000) >> 16),
 		(u8)((type & 0x0000ff00) >> 8),
 		(u8)(type & 0x000000ff),
-		(u8)buffer.size()
-	});
+		(u8)((size & 0xff00) >> 8),
+		(u8)(size & 0xff),
+	}, 7, callback, type };
 
-	for (size_t i = 0; i < buffer.size(); ++i)
-	{
-		data.push_back(buffer[i]);
-	}
+	_pendingReads.push(r);
+}
 
-	data.resize(22, 0);
+bool Wiimote::writeRegister(RegisterType type, u8* buffer, size_t size)
+{
+	u8 b[22] = { 0 };
 
-	return _device->write(data);
+	b[0] = OutputReportTypes::write;
+	b[1] = (u8)(((type & 0xff000000) >> 24) | (_state.rumble ? 0x01 : 0x00));
+	b[2] = (u8)((type & 0x00ff0000) >> 16);
+	b[3] = (u8)((type & 0x0000ff00) >> 8);
+	b[4] = (u8)(type & 0x000000ff);
+	b[5] = (u8)size;
+
+	memcpy(b + 6, buffer, size);
+
+	return _device->write(b, 22);
+}
+
+bool Wiimote::writeRegister(RegisterType type, u8 val)
+{
+	return writeRegister(type, &val, 1);
 }
 
 void Wiimote::onMessage(const u8* b)
@@ -452,12 +471,11 @@ void Wiimote::onMessage(const u8* b)
 			break;
 
 		case InputReportTypes::Status:
-		{
 			parseButtons(b, _state);
 			parseStatus(b, _state);
 			updateExtension();
 			updateReportMode();
-		}
+			break;
 	}
 
 	if (_state.motionPlusActive && _state.motionPlus.extensionConnected != motionPlusExtension)
@@ -477,11 +495,59 @@ void Wiimote::onMessage(const u8* b)
 		PendingRead& r = _pendingReads.front();
 		_currentRead = r.callback;
 		_currentReadRegister = r.reg;
-		_device->write(r.buffer);
+		_device->write(r.buffer, r.size);
 		_pendingReads.pop();
 	}
 
 	_lock.unlock();
+}
+
+void Wiimote::startReader()
+{
+	_running = true;
+	_thread = std::thread(&Wiimote::continuousReader, this);
+}
+
+void Wiimote::stopReader()
+{
+	if (_running)
+	{
+		_running = false;
+		/*do {
+			SetEvent(_readIo.hEvent);
+		} while (WaitForSingleObject(_readThread, 100) == WAIT_TIMEOUT);*/
+	}
+
+	/*if (_readIo.hEvent != INVALID_HANDLE_VALUE)
+	{
+		CloseHandle(_readIo.hEvent);
+		_readIo.hEvent = INVALID_HANDLE_VALUE;
+	}*/
+}
+
+void Wiimote::continuousReader()
+{
+	u8 data[256];
+	size_t bytesRead;
+	size_t inputReportSize = _device->inputReportSize();
+
+	while (_running)
+	{
+		if (_device->read(data, 256, bytesRead))
+		{	
+			if (bytesRead % inputReportSize != 0)
+			{
+				std::cout << "WARNING: input report size of " << inputReportSize << " is invalid" << std::endl;
+				continue;
+			}
+
+			for (size_t i = 0; i < bytesRead / inputReportSize; i++)
+			{
+				unsigned char* b = data + i * inputReportSize;
+				onMessage(b);
+			}
+		}		
+	}
 }
 
 void Wiimote::update()
@@ -493,7 +559,7 @@ void Wiimote::update()
 	memcpy(&next, &_state, sizeof(WiimoteState));
 	_lock.unlock();
 
-	if (_buttonCallback != nullptr)
+	if (_buttonCallback != nullptr && (_features | WiimoteFeatures::Buttons))
 	{
 		for (int i = 0; i < c_WiimoteButtonCount; ++i)
 		{
@@ -504,7 +570,58 @@ void Wiimote::update()
 		}
 	}
 
+	if (_accelerometerCallback != nullptr && (_features | WiimoteFeatures::Accelerometer))
+	{
+		if (!_filterAccelerometer || next.accelerometer != old.accelerometer)
+		{
+			_accelerometerCallback(next.accelerometer);
+		}
+	}
+
+	if ((next.extensionType == ExtensionTypes::Nunchuck || next.extensionType == ExtensionTypes::Nunchuck_TR) && (_features | WiimoteFeatures::Extension))
+	{
+		if (_nunchuckButtonCallback != nullptr)
+		{
+			for (int i = 0; i < c_NunchuckButtonCount; ++i)
+			{
+				if (next.nunchuck.buttons[i] != old.nunchuck.buttons[i])
+				{
+					_nunchuckButtonCallback((NunchuckButton)i, next.nunchuck.buttons[i]);
+				}
+			}
+		}
+		
+		if (_nunchuckAccelerometerCallback != nullptr)
+		{
+			if (!_filterNunchuckAccelerometer || next.nunchuck.accelerometer != old.nunchuck.accelerometer)
+			{
+				_nunchuckAccelerometerCallback(next.nunchuck.accelerometer);
+			}
+		}
+	}
+
+	if (_motionPlusCallback!= nullptr && next.motionPlusActive == true && (_features | WiimoteFeatures::MotionPlus))
+	{
+		if (!_filterMotionPlus || next.motionPlus.speed != old.motionPlus.speed)
+		{
+			_motionPlusCallback(next.motionPlus.speed);
+		}
+	}
+
 	_outStateIdx = 1 - _outStateIdx;
+}
+
+void Wiimote::clearEvents()
+{
+	_buttonCallback = nullptr;
+	_nunchuckButtonCallback = nullptr;
+	_accelerometerCallback = nullptr;
+	_nunchuckAccelerometerCallback = nullptr;
+	_motionPlusCallback = nullptr;
+
+	_filterAccelerometer = false;
+	_filterNunchuckAccelerometer = false;
+	_filterMotionPlus = false;
 }
 
 bool Wiimote::activateExtension()
@@ -516,8 +633,8 @@ bool Wiimote::activateExtension()
 
 	std::cout << "Activating extension..." << std::endl;
 
-	return	writeRegister(RegisterTypes::ExtensionInit1, DataBuffer({ 0x55 })) &&
-			writeRegister(RegisterTypes::ExtensionInit2, DataBuffer({ 0x00 }));
+	return	writeRegister(RegisterTypes::ExtensionInit1, 0x55) &&
+			writeRegister(RegisterTypes::ExtensionInit2, 0x00);
 }
 
 bool Wiimote::activateMotionPlus()
@@ -529,8 +646,8 @@ bool Wiimote::activateMotionPlus()
 
 	std::cout << "Activating motion plus..." << std::endl;
 
-	return	writeRegister(RegisterTypes::MotionPlusInit1, DataBuffer({ 0x55 })) &&
-			writeRegister(RegisterTypes::MotionPlusInit2, DataBuffer({ 0x04 }));
+	return	writeRegister(RegisterTypes::MotionPlusInit1, 0x55) &&
+			writeRegister(RegisterTypes::MotionPlusInit2, 0x04);
 }
 
 bool Wiimote::deactivateMotionPlus()
@@ -542,7 +659,7 @@ bool Wiimote::deactivateMotionPlus()
 
 	std::cout << "Deactivating motion plus..." << std::endl;
 
-	if (writeRegister(RegisterTypes::ExtensionInit1, DataBuffer({ 0x55 })))
+	if (writeRegister(RegisterTypes::ExtensionInit1, 0x55))
 	{
 		_state.motionPlusActive = false;
 		return true;

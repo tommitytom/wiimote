@@ -30,6 +30,8 @@ private:
 	std::function<void(Wiimote*)> _disconnectionCallback;
 
 	bool _run = false;
+	int _nextId = 0;
+	int _interval = 1000;
 
 public:
 	WiimoteManager();
@@ -37,7 +39,7 @@ public:
 
 	void scan();
 	
-	void start();
+	void continuousScan(int interval = 1000);
 	void stop();
 	void update();
 	void shutdown();

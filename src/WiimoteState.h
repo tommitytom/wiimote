@@ -26,6 +26,26 @@ namespace WiimoteButtons {
 		Plus, Minus,
 		Home
 	};
+
+	static const char* toString(WiimoteButton button)
+	{
+		switch(button)
+		{
+			case Up: return "Up";
+			case Down: return "Down";
+			case Left: return "Left";
+			case Right: return "Right";
+			case A: return "A";
+			case B: return "B";
+			case One: return "One";
+			case Two: return "Two";
+			case Plus: return "Plus";
+			case Minus: return "Minus";
+			case Home: return "Home";
+		}
+
+		return nullptr;
+	}
 }
 typedef WiimoteButtons::WiimoteButton WiimoteButton;
 
@@ -34,6 +54,17 @@ namespace NunchuckButtons {
 	{
 		C, Z
 	};
+
+	static const char* toString(NunchuckButton button)
+	{
+		switch (button)
+		{
+		case C: return "C";
+		case Z: return "Z";
+		}
+
+		return nullptr;
+	}
 }
 typedef NunchuckButtons::NunchuckButton NunchuckButton;
 
@@ -227,6 +258,16 @@ public:
 	Vector3 operator/(const Vector3& other) { return Vector3(x / other.x, y / other.y, z / other.z); }
 	Vector3 operator*(float v) { return Vector3(x * v, y * v, z * v); }
 
+	bool operator==(const Vector3& other) const
+	{
+		return x == other.x && y == other.y && z == other.z;
+	}
+
+	bool operator!=(const Vector3& other) const
+	{
+		return x != other.x || y != other.y || z != other.z;
+	}
+
 	friend std::ostream & operator<<(std::ostream &os, const Vector3& p)
 	{
 		return os << "{ " << p.x << ", " << p.y << ", " << p.z << " }";
@@ -234,6 +275,7 @@ public:
 };
 
 const int c_WiimoteButtonCount = 11;
+const int c_NunchuckButtonCount = 2;
 typedef bool WiimoteButtonState[c_WiimoteButtonCount];
 typedef bool NunchuckButtonState[2];
 
