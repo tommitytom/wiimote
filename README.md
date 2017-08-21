@@ -17,30 +17,30 @@ WiimoteManager m;
 m.onConnection([](Wiimote* wiimote) { 
 	std::cout << "Wiimote " << wiimote->id() + 1 << " connected!" << std::endl;
 
-	wiimote->onButton([wiimote, &stream, name](WiimoteButton button, bool down) {
+	wiimote->onButton([wiimote](WiimoteButton button, bool down) {
 		const char* buttonName = WiimoteButtons::toString(button);
 		if (buttonName) {
 			std::cout << buttonName << down ? " pressed" : " released" << std::endl;
 		}
 	});
 
-	wiimote->onNunchuckButton([wiimote, &stream, name](NunchuckButton button, bool down) {
+	wiimote->onNunchuckButton([wiimote](NunchuckButton button, bool down) {
 		const char* buttonName = NunchuckButtons::toString(button);
 		if (buttonName) {
 			std::cout << buttonName << down ? " pressed" : " released" << std::endl;
 		}
 	});
 
-	wiimote->onAccelerometer([wiimote, &stream, name](const Vector3& v) {
+	wiimote->onAccelerometer([wiimote](const Vector3& v) {
 		std::cout << "Accel: " << v.x << ", " << v.y << ", " << v.z << std::endl;
 	}, true);
 
 	
-	wiimote->onNunchuckAccelerometer([wiimote, &stream, name](const Vector3& v) {
+	wiimote->onNunchuckAccelerometer([wiimote](const Vector3& v) {
 		std::cout << "Nunchuck Accel: " << v.x << ", " << v.y << ", " << v.z << std::endl;
 	}, true);
 
-	wiimote->onMotionPlus([wiimote, &stream, name](const Vector3& v) {
+	wiimote->onMotionPlus([wiimote](const Vector3& v) {
 		std::cout << "Motion Plus: " << v.x << ", " << v.y << ", " << v.z << std::endl;
 	}, true);
 
